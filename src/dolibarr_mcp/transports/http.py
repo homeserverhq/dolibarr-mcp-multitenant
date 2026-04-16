@@ -13,6 +13,7 @@ Security features:
 import os
 import sys
 import logging
+import asyncio
 from typing import Any, Optional
 
 from mcp.server import Server
@@ -29,6 +30,9 @@ from starlette.types import Receive, Scope, Send
 import uvicorn
 
 from ..auth.api_key import APIKeyAuth, extract_bearer_token
+
+_current_auth_token: Optional[str] = None
+_token_lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +91,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Add auth info to request state
         request.state.authenticated = True
         request.state.client_ip = client_ip
+        request.state.api_key = api_key
 
         return await call_next(request)
 
@@ -149,34 +154,38 @@ def build_http_app(
             yield
 
     async def asgi_handler(scope: Scope, receive: Receive, send: Send) -> None:
-        """Main ASGI request handler."""
+        """Main ASGI request handler with auth token injection."""
+        global _current_auth_token
+        auth_header = None
+        for key, value in scope.get("headers", []):
+            if key == b"authorization":
+                auth_header = value.decode("utf-8")
+                if auth_header.startswith("Bearer "):
+                    auth_header = auth_header[7:]
+                elif auth_header.startswith("Token "):
+                    auth_header = auth_header[6:]
+                break
+
+        async with _token_lock:
+            _current_auth_token = auth_header
+
         await session_manager.handle_request(scope, receive, send)
 
     app = Starlette(
         routes=[
-            # Health check (no auth)
             Route("/health", health_handler, methods=["GET"]),
             Route("/healthz", health_handler, methods=["GET"]),
             Route("/ready", health_handler, methods=["GET"]),
-
-            # Stats (requires auth)
             Route("/stats", stats_handler, methods=["GET"]),
-
-            # MCP endpoints
             Route("/", ASGIEndpoint(asgi_handler), methods=["GET", "POST", "DELETE"]),
             Route("/{path:path}", ASGIEndpoint(asgi_handler), methods=["GET", "POST", "DELETE"]),
-
-            # CORS preflight
             Route("/", options_handler, methods=["OPTIONS"]),
             Route("/{path:path}", options_handler, methods=["OPTIONS"]),
         ],
         lifespan=lifespan,
     )
 
-    # Add authentication middleware
     app.add_middleware(AuthMiddleware, auth=auth, auth_enabled=auth_enabled)
-
-    # Add CORS middleware for cross-origin requests
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -186,6 +195,11 @@ def build_http_app(
     )
 
     return app
+
+
+def get_current_auth_token() -> Optional[str]:
+    """Get the current request's auth token (for multi-tenancy support)."""
+    return _current_auth_token
 
 
 async def run_http_server(

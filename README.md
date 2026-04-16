@@ -23,6 +23,7 @@ configuration, API coverage, and contributor workflows.
   error handling.
 - **Ready for MCP hosts** – STDIO transport compatible with Claude Desktop out
   of the box.
+- **Multi-tenancy support** – HTTP transport extracts `Authorization` header to authenticate each user with their own Dolibarr instance.
 - **Shared workflow with prestashop-mcp** – Identical developer ergonomics and
   documentation structure across both repositories.
 
@@ -93,6 +94,7 @@ The server reads configuration from the environment or a `.env` file. Both
 | `MCP_TRANSPORT` | Transport to use: `stdio` (default) or `http` for streamable HTTP. |
 | `MCP_HTTP_HOST` | Host/interface to bind when using HTTP transport (default `0.0.0.0`). |
 | `MCP_HTTP_PORT` | Port to bind when using HTTP transport (default `8080`). |
+| `MCP_AUTH_ENABLED` | Enable API key authentication for HTTP transport (default `true`). Set to `false` when using multi-tenancy with user-provided tokens. |
 
 Example `.env`:
 
@@ -153,6 +155,23 @@ MCP_TRANSPORT=http MCP_HTTP_PORT=8080 python -m dolibarr_mcp.dolibarr_mcp_server
 Then point Open WebUI’s MCP configuration at `http://<host>:8080/`. The MCP
 protocol headers (including `mcp-protocol-version`) are handled automatically by
 Open WebUI’s MCP client.
+
+### Multi-tenancy (HTTP transport only)
+
+When using the HTTP transport, each user can authenticate with their own Dolibarr instance by passing their API key in the `Authorization` header. This allows a single MCP server deployment to serve multiple Dolibarr users.
+
+```bash
+curl -X POST http://localhost:8080/ \
+  -H "Authorization: Bearer your-dolibarr-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", ...}'
+```
+
+Supported authorization formats:
+- `Authorization: Bearer <api-key>`
+- `Authorization: Token <api-key>`
+
+If no `Authorization` header is provided, the server falls back to `DOLIBARR_API_KEY` from the environment for backward compatibility.
 
 ### Test the Dolibarr credentials
 

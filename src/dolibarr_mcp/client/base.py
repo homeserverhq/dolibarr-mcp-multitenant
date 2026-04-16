@@ -36,21 +36,29 @@ class DolibarrClient:
     - Client-side validation before API calls
     - Structured error handling
     - Context manager support
+    - Multi-tenancy support via per-request auth tokens
 
     Usage:
         async with DolibarrClient(config) as client:
             customers = await client.get_customers()
+
+        # With multi-tenancy (auth_token from request):
+        async with DolibarrClient(config, auth_token="user-token") as client:
+            customers = await client.get_customers()
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, auth_token: Optional[str] = None):
         """Initialize the Dolibarr client.
 
         Args:
             config: Configuration instance with API URL and credentials
+            auth_token: Optional auth token from request for multi-tenancy support.
+                       If provided, this takes precedence over config.api_key
         """
         self.config = config
         self.base_url = config.dolibarr_url.rstrip('/')
         self.api_key = config.api_key
+        self.auth_token = auth_token
         self.session: Optional[ClientSession] = None
         self.logger = logging.getLogger(__name__)
         self.debug_mode = getattr(config, "debug_mode", False)
@@ -75,10 +83,11 @@ class DolibarrClient:
     async def start_session(self) -> None:
         """Start the HTTP session."""
         if not self.session:
+            effective_key = self.auth_token or self.api_key
             self.session = aiohttp.ClientSession(
                 timeout=self.timeout,
                 headers={
-                    "DOLAPIKEY": self.api_key,
+                    "DOLAPIKEY": effective_key,
                     "Content-Type": "application/json",
                     "Accept": "application/json"
                 }
@@ -716,9 +725,7 @@ class DolibarrClient:
 
     async def get_projects(self, limit: int = 100, page: int = 1, status: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get list of projects."""
-        params: Dict[str, Any] = {"limit": limit, "page": page}
-        if status is not None:
-            params["status"] = status
+        params = {"limit": limit}
         result = await self.request("GET", "projects", params=params)
         return result if isinstance(result, list) else []
 

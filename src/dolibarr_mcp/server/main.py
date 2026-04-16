@@ -9,7 +9,7 @@ import json
 import sys
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, List
+from typing import Any, List, Optional
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -20,7 +20,7 @@ from .tools import TOOL_REGISTRY
 from .handlers import dispatch_tool_legacy
 from .responses import error_response
 from ..transports.stdio import run_stdio_server
-from ..transports.http import run_http_server
+from ..transports.http import run_http_server, get_current_auth_token
 
 # Configure logging
 logging.basicConfig(
@@ -70,7 +70,8 @@ async def handle_call_tool(name: str, arguments: dict) -> List[TextContent]:
     """
     try:
         config = Config()
-        async with DolibarrClient(config) as client:
+        auth_token = get_current_auth_token()
+        async with DolibarrClient(config, auth_token=auth_token) as client:
             result = await dispatch_tool_legacy(client, name, arguments)
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
 

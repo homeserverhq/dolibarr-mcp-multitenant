@@ -33,6 +33,9 @@ from .cache.strategies import should_cache, get_ttl_for_entity, get_invalidation
 _cache: Optional[DragonflyCache] = None
 _toon_encoder = ToonEncoder()
 
+# Multi-tenancy support: current auth token from request
+_current_auth_token: Optional[str] = None
+
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
@@ -465,7 +468,7 @@ async def handle_call_tool(name: str, arguments: dict):
 
         # Execute tool
         config = Config()
-        async with DolibarrClient(config) as client:
+        async with DolibarrClient(config, auth_token=_current_auth_token) as client:
             result = await _dispatch_tool(client, name, arguments)
 
         # Cache result for read operations
@@ -870,6 +873,18 @@ def _build_http_app(session_manager: StreamableHTTPSessionManager, auth: Optiona
             yield
 
     async def asgi_handler(scope, receive, send):
+        global _current_auth_token
+        _current_auth_token = None
+        for key, value in scope.get("headers", []):
+            if key == b"authorization":
+                auth_header = value.decode("utf-8")
+                if auth_header.startswith("Bearer "):
+                    _current_auth_token = auth_header[7:]
+                elif auth_header.startswith("Token "):
+                    _current_auth_token = auth_header[6:]
+                else:
+                    _current_auth_token = auth_header
+                break
         await session_manager.handle_request(scope, receive, send)
 
     app = Starlette(

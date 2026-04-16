@@ -451,10 +451,10 @@ async def handle_call_tool(name: str, arguments: dict):
         cache = await _get_cache()
         cache_status = "DISABLED"
 
-        # Check cache for read operations
+        # Check cache for read operations (include auth for multi-tenancy isolation)
         cache_key = None
         if cache and cache._connected and should_cache(name):
-            cache_key = cache.make_tool_key(name, arguments)
+            cache_key = cache.make_tool_key(name, arguments, auth_context=_current_auth_token)
             cached = await cache.get(cache_key)
             if cached is not None:
                 elapsed = (time.time() - start_time) * 1000
@@ -477,12 +477,17 @@ async def handle_call_tool(name: str, arguments: dict):
             await cache.set(cache_key, result, ttl)
             cache_status = f"MISS → STORED (TTL: {ttl}s)"
 
-        # Invalidate related caches for write operations
+        # Invalidate related caches for write operations (per-user for multi-tenancy)
         if cache and cache._connected:
             targets = get_invalidation_targets(name)
             if targets:
                 for target in targets:
-                    await cache.invalidate_pattern(f"tool:{target}:*")
+                    if _current_auth_token:
+                        auth_hash = hashlib.md5(_current_auth_token.encode()).hexdigest()[:8]
+                        pattern = f"tool:{target}:{auth_hash}:*"
+                    else:
+                        pattern = f"tool:{target}:*"
+                    await cache.invalidate_pattern(pattern)
                 print(f"🗑️  CACHE INVALIDATED: {targets}", file=sys.stderr)
 
         elapsed = (time.time() - start_time) * 1000

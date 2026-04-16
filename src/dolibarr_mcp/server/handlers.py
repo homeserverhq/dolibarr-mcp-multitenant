@@ -237,28 +237,35 @@ async def dispatch_tool_cached(
     name: str,
     args: Dict[str, Any],
     cache: Optional[Any] = None,
+    auth_context: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Dispatch tool call with caching support.
 
     Checks cache before executing, stores results on success.
     Invalidates related caches for mutation operations.
 
+    For multi-tenancy support, cache keys include auth context to ensure
+    different users get isolated cached results.
+
     Args:
         client: DolibarrClient instance
         name: Tool name
         args: Tool arguments
         cache: Optional DragonflyCache instance
+        auth_context: Optional auth token for cache isolation
 
     Returns:
         Formatted response (success or error)
     """
+    import hashlib
+
     # Check if we should try cache
+    cache_key = None
     if cache and should_cache(name):
-        cache_key = cache.make_tool_key(name, args)
+        cache_key = cache.make_tool_key(name, args, auth_context=auth_context)
         cached = await cache.get(cache_key)
         if cached is not None:
             logger.debug(f"Cache HIT for {name}")
-            # Add cache metadata to response
             if isinstance(cached, dict) and "metadata" in cached:
                 cached["metadata"]["cached"] = True
             return cached
@@ -267,17 +274,22 @@ async def dispatch_tool_cached(
     response = await dispatch_tool(client, name, args)
 
     # Cache successful read results
-    if cache and response.get("success") and should_cache(name):
+    if cache and response.get("success") and should_cache(name) and cache_key:
         ttl = get_ttl_for_entity(name)
         await cache.set(cache_key, response, ttl)
         logger.debug(f"Cache SET for {name} (TTL: {ttl}s)")
 
-    # Invalidate related caches for mutations
+    # Invalidate related caches for mutations (per-user for multi-tenancy)
     if cache and response.get("success"):
         targets = get_invalidation_targets(name)
         if targets:
             for target in targets:
-                await cache.invalidate_pattern(f"tool:{target}:*")
+                if auth_context:
+                    auth_hash = hashlib.md5(auth_context.encode()).hexdigest()[:8]
+                    pattern = f"tool:{target}:{auth_hash}:*"
+                else:
+                    pattern = f"tool:{target}:*"
+                await cache.invalidate_pattern(pattern)
             logger.debug(f"Cache INVALIDATE for {name}: {targets}")
 
     return response
@@ -289,6 +301,7 @@ async def dispatch_tool_formatted(
     args: Dict[str, Any],
     cache: Optional[Any] = None,
     output_format: Optional[OutputFormat] = None,
+    auth_context: Optional[str] = None,
 ) -> str:
     """Dispatch tool call and return formatted string output.
 
@@ -300,6 +313,7 @@ async def dispatch_tool_formatted(
         args: Tool arguments
         cache: Optional DragonflyCache instance
         output_format: Output format (default: TOON)
+        auth_context: Optional auth token for cache isolation
 
     Returns:
         Formatted string (TOON or JSON)
@@ -314,7 +328,7 @@ async def dispatch_tool_formatted(
 
     # Get response (cached or fresh)
     if cache:
-        response = await dispatch_tool_cached(client, name, args_clean, cache)
+        response = await dispatch_tool_cached(client, name, args_clean, cache, auth_context=auth_context)
     else:
         response = await dispatch_tool(client, name, args_clean)
 

@@ -128,17 +128,29 @@ class DragonflyCache:
         sorted_args = json.dumps(args, sort_keys=True, default=str)
         return hashlib.md5(sorted_args.encode()).hexdigest()[:12]
 
-    def make_tool_key(self, tool_name: str, args: Dict[str, Any]) -> str:
+    def make_tool_key(
+        self,
+        tool_name: str,
+        args: Dict[str, Any],
+        auth_context: Optional[str] = None
+    ) -> str:
         """Create cache key for a tool call.
+
+        For multi-tenancy support, cache keys can include auth context
+        to ensure different users get isolated cached results.
 
         Args:
             tool_name: Name of the tool
             args: Tool arguments
+            auth_context: Optional auth token/tenant ID for isolation
 
         Returns:
             Cache key string
         """
         args_hash = self._hash_args(args)
+        if auth_context:
+            auth_hash = hashlib.md5(auth_context.encode()).hexdigest()[:8]
+            return f"tool:{tool_name}:{auth_hash}:{args_hash}"
         return f"tool:{tool_name}:{args_hash}"
 
     async def get(self, key: str) -> Optional[Any]:

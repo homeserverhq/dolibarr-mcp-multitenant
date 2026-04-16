@@ -95,6 +95,7 @@ The server reads configuration from the environment or a `.env` file. Both
 | `MCP_HTTP_HOST` | Host/interface to bind when using HTTP transport (default `0.0.0.0`). |
 | `MCP_HTTP_PORT` | Port to bind when using HTTP transport (default `8080`). |
 | `MCP_AUTH_ENABLED` | Enable API key authentication for HTTP transport (default `true`). Set to `false` when using multi-tenancy with user-provided tokens. |
+| `CACHE_ENABLED` | Enable Redis/DragonflyDB caching (default `true`). Disable for stricter multi-tenancy isolation. |
 
 Example `.env`:
 
@@ -172,6 +173,8 @@ Supported authorization formats:
 - `Authorization: Token <api-key>`
 
 If no `Authorization` header is provided, the server falls back to `DOLIBARR_API_KEY` from the environment for backward compatibility.
+
+**Caching:** When Redis/DragonflyDB caching is enabled, cache keys include the auth token to ensure users don't see each other's cached data. To disable caching entirely in multi-tenant deployments, set `CACHE_ENABLED=false`.
 
 ### Test the Dolibarr credentials
 
